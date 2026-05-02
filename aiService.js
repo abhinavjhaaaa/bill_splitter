@@ -1,15 +1,14 @@
 /**
  * aiService.js
- * Handles all communication with the Google Gemini API.
+ * Handles all communication with the OpenAI Responses API.
  */
 
 const axios = require("axios");
 
 const MAX_RETRIES = parseInt(process.env.AI_MAX_RETRIES, 10) || 3;
 const DEFAULT_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-flash-lite-latest",
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
 ];
 
 function unique(values) {
@@ -17,7 +16,7 @@ function unique(values) {
 }
 
 function getModelCandidates() {
-  return unique([process.env.AI_MODEL, ...DEFAULT_MODELS]);
+  return unique([process.env.OPENAI_MODEL, ...DEFAULT_MODELS]);
 }
 
 function buildPrompt({ text, participants, prices }) {
@@ -68,50 +67,115 @@ function cleanJsonText(rawText) {
   return cleaned;
 }
 
-function extractGeminiText(data) {
-  const candidate = data?.candidates?.[0];
-  if (!candidate) {
-    throw new Error("Gemini returned no candidates.");
+function extractOpenAIText(data) {
+  if (typeof data?.output_text === "string" && data.output_text.trim()) {
+    return data.output_text.trim();
   }
 
-  const rawText = candidate.content?.parts
-    ?.map((part) => part.text || "")
+  const rawText = (data?.output || [])
+    .flatMap((item) => item.content || [])
+    .map((content) => content.text || content.output_text || "")
     .join("")
     .trim();
 
   if (!rawText) {
-    throw new Error("Gemini returned an empty response.");
+    throw new Error("OpenAI returned an empty response.");
   }
 
   return rawText;
 }
 
-async function callGemini(parts, maxOutputTokens = 1024, model = getModelCandidates()[0]) {
-  const apiKey = process.env.AI_API_KEY;
+function billItemsSchema() {
+  return {
+    type: "json_schema",
+    name: "bill_items",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["items"],
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["name", "shared_by"],
+            properties: {
+              name: { type: "string" },
+              shared_by: {
+                type: "array",
+                items: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+function receiptSchema() {
+  return {
+    type: "json_schema",
+    name: "receipt_items",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["restaurant", "items", "subtotal", "tax", "total"],
+      properties: {
+        restaurant: { type: "string" },
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["name", "price"],
+            properties: {
+              name: { type: "string" },
+              price: { type: "number" },
+            },
+          },
+        },
+        subtotal: { type: "number" },
+        tax: { type: "number" },
+        total: { type: "number" },
+      },
+    },
+  };
+}
+
+async function callOpenAI(input, responseFormat, maxOutputTokens = 1024, model = getModelCandidates()[0]) {
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    throw new Error("AI_API_KEY is not set in environment variables.");
+    throw new Error("OPENAI_API_KEY is not set in environment variables.");
   }
 
   const response = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    "https://api.openai.com/v1/responses",
     {
-      contents: [{ parts }],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens,
-        responseMimeType: "application/json",
+      model,
+      input,
+      max_output_tokens: maxOutputTokens,
+      store: false,
+      text: {
+        format: responseFormat,
       },
     },
     {
-      headers: { "Content-Type": "application/json" },
-      timeout: 30000,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      timeout: 45000,
     }
   );
 
-  return JSON.parse(cleanJsonText(extractGeminiText(response.data)));
+  return JSON.parse(cleanJsonText(extractOpenAIText(response.data)));
 }
 
-function logGeminiError(label, model, attempt, err) {
+function logOpenAIError(label, model, attempt, err) {
   if (err.response?.data) {
     console.error(
       `${label} error (${model}, attempt ${attempt}):`,
@@ -120,6 +184,19 @@ function logGeminiError(label, model, attempt, err) {
   } else {
     console.error(`${label} failed (${model}, attempt ${attempt}):`, err.message);
   }
+}
+
+function isNonRetryableOpenAIError(err) {
+  const status = err.response?.status;
+  return status && [400, 401, 402, 403, 404].includes(status);
+}
+
+function buildOpenAIRequestError(err) {
+  const status = err.response?.status;
+  const detail = err.response?.data?.error?.message || err.message;
+  const wrapped = new Error(`OpenAI API error: ${detail}`);
+  wrapped.statusCode = status === 429 ? 429 : status && status < 500 ? 502 : 503;
+  return wrapped;
 }
 
 function buildAiFailure(message, lastError) {
@@ -135,7 +212,17 @@ async function parseBillText(input) {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     for (const model of models) {
       try {
-        const parsed = await callGemini([{ text: buildPrompt(input) }], 1024, model);
+        const parsed = await callOpenAI(
+          [
+            {
+              role: "user",
+              content: [{ type: "input_text", text: buildPrompt(input) }],
+            },
+          ],
+          billItemsSchema(),
+          1024,
+          model
+        );
 
         if (!Array.isArray(parsed?.items)) {
           throw new Error('Parsed JSON is missing the "items" array.');
@@ -150,7 +237,13 @@ async function parseBillText(input) {
         return parsed;
       } catch (err) {
         lastError = err;
-        logGeminiError("Gemini API", model, attempt, err);
+        if (err.message?.includes("OPENAI_API_KEY")) {
+          throw err;
+        }
+        logOpenAIError("OpenAI API", model, attempt, err);
+        if (isNonRetryableOpenAIError(err)) {
+          throw buildOpenAIRequestError(err);
+        }
       }
     }
 
@@ -224,16 +317,20 @@ Rules:
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     for (const model of models) {
       try {
-        const parsed = await callGemini(
+        const parsed = await callOpenAI(
           [
             {
-              inline_data: {
-                mime_type: mimeType || "image/jpeg",
-                data: imageBase64,
-              },
+              role: "user",
+              content: [
+                { type: "input_text", text: prompt },
+                {
+                  type: "input_image",
+                  image_url: `data:${mimeType || "image/jpeg"};base64,${imageBase64}`,
+                },
+              ],
             },
-            { text: prompt },
           ],
+          receiptSchema(),
           1536,
           model
         );
@@ -241,7 +338,13 @@ Rules:
         return normalizeReceipt(parsed);
       } catch (err) {
         lastError = err;
-        logGeminiError("Gemini receipt scan", model, attempt, err);
+        if (err.message?.includes("OPENAI_API_KEY")) {
+          throw err;
+        }
+        logOpenAIError("OpenAI receipt scan", model, attempt, err);
+        if (isNonRetryableOpenAIError(err)) {
+          throw buildOpenAIRequestError(err);
+        }
       }
     }
 

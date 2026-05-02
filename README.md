@@ -1,6 +1,6 @@
 # SplitAI Backend
 
-AI-powered bill splitter backend using **Google Gemini 1.5 Flash** + **Node.js / Express**.
+AI-powered bill splitter app using the **OpenAI Responses API** + **Node.js / Express**.
 
 ---
 
@@ -16,7 +16,7 @@ splitai-backend/
 ├── controllers/
 │   └── billController.js       # Request orchestration
 ├── services/
-│   └── aiService.js            # Gemini API integration + retry logic
+│   └── aiService.js            # OpenAI API integration + retry logic
 ├── utils/
 │   └── calculateSplit.js       # Bill-splitting math
 └── middleware/
@@ -35,9 +35,9 @@ npm install
 # 2. Create your .env file
 cp .env.example .env
 
-# 3. Add your Gemini API key to .env
-#    Get one free at: https://aistudio.google.com/app/apikey
-AI_API_KEY=your_key_here
+# 3. Add your OpenAI API key to .env
+#    Create one at: https://platform.openai.com/api-keys
+OPENAI_API_KEY=sk-your-api-key-here
 
 # 4. Start the server
 npm start          # production
@@ -155,16 +155,17 @@ curl -X POST http://localhost:3000/split-bill \
 
 | Variable        | Default | Description                                  |
 |-----------------|---------|----------------------------------------------|
-| `AI_API_KEY`    | —       | **Required.** Google Gemini API key          |
+| `OPENAI_API_KEY`| —       | **Required.** OpenAI API key                 |
+| `OPENAI_MODEL`  | `gpt-5.4-mini` | OpenAI model used for text and receipt scanning |
 | `PORT`          | `3000`  | HTTP port                                    |
 | `NODE_ENV`      | `development` | Set to `production` to suppress stack traces |
-| `AI_MAX_RETRIES`| `3`     | Max retries if Gemini returns invalid JSON   |
+| `AI_MAX_RETRIES`| `3`     | Max retries if OpenAI returns invalid JSON   |
 
 ---
 
 ## 💡 How It Works
 
 1. **Validation** — middleware checks all fields before anything else.
-2. **AI Parsing** — `aiService.js` sends the bill description + participant list + item names to Gemini 1.5 Flash with a strict JSON-only prompt.
-3. **Retry Logic** — if Gemini returns malformed JSON, the service retries up to `AI_MAX_RETRIES` times with exponential back-off.
+2. **AI Parsing** — `aiService.js` sends the bill description + participant list + item names to OpenAI with a strict JSON-only prompt.
+3. **Retry Logic** — if OpenAI returns malformed JSON, the service retries up to `AI_MAX_RETRIES` times with exponential back-off.
 4. **Split Calculation** — `calculateSplit.js` divides each item's price among its `shared_by` participants, then computes net balances and minimises the number of settlement transactions.

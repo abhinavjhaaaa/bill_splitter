@@ -20,7 +20,7 @@ exports.splitBill = async (req, res, next) => {
     console.log("   Prices:", prices);
 
     // ── 1. Ask AI to parse the natural-language description ──────────────────
-    console.log("\n🤖 Sending to Gemini AI...");
+    console.log("\n🤖 Sending to OpenAI...");
     const aiResult = await aiService.parseBillText({ text, participants, prices });
     console.log("✅ AI parsed items:", JSON.stringify(aiResult.items, null, 2));
 

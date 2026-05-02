@@ -1,7 +1,7 @@
 {
   "name": "splitai",
   "version": "1.0.0",
-  "description": "AI-powered bill splitter app using Gemini API",
+  "description": "AI-powered bill splitter app using the OpenAI API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

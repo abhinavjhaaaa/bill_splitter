@@ -18,7 +18,7 @@ module.exports = function errorHandler(err, _req, res, _next) {
   }
 
   if (err.response) {
-    // Gemini returned a 4xx/5xx
+    // OpenAI returned a 4xx/5xx
     return res.status(502).json({
       success: false,
       error: "AI API returned an error.",
@@ -35,10 +35,10 @@ module.exports = function errorHandler(err, _req, res, _next) {
   }
 
   // Missing API key
-  if (err.message?.includes("AI_API_KEY")) {
+  if (err.message?.includes("OPENAI_API_KEY")) {
     return res.status(500).json({
       success: false,
-      error: "Server misconfiguration: AI API key is not set.",
+      error: "Server misconfiguration: OPENAI_API_KEY is not set.",
     });
   }
 
