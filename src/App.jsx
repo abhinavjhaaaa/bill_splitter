@@ -893,7 +893,7 @@ function UploadPage({ navigate, addToast, setDraftBill }) {
     const interval = setInterval(()=>{ msgIdx=(msgIdx+1)%MSGS.length; setLoadMsg(MSGS[msgIdx]); },1800);
     try {
       const { base64, mimeType } = await prepareImageForScan(file);
-      const resp = await fetch("/scan-receipt",{
+      const resp = await fetch("/api/split-bill",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({ imageBase64: base64, mimeType })
