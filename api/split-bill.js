@@ -13,19 +13,17 @@ export default async function handler(req, res) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: "gpt-5.4-mini",
         messages: [
           {
             role: "system",
-            content: "Extract items, prices, total, and restaurant name from this bill image. Return JSON format."
+            content:
+              "You are a strict JSON generator. Extract restaurant name, items (name and price), and total from receipt image. Return ONLY valid JSON like: {\"restaurant\":\"\",\"items\":[{\"name\":\"\",\"price\":0}],\"total\":0}"
           },
           {
             role: "user",
             content: [
-              {
-                type: "text",
-                text: "Analyze this receipt"
-              },
+              { type: "text", text: "Analyze this receipt" },
               {
                 type: "image_url",
                 image_url: {
@@ -40,9 +38,20 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
+    // Extract AI response text
+    const content = data.choices?.[0]?.message?.content || "{}";
+
+    // Convert string → JSON safely
+    let parsed = {};
+    try {
+      parsed = JSON.parse(content);
+    } catch (e) {
+      console.log("Parsing failed:", content);
+    }
+
     return res.status(200).json({
       success: true,
-      ai: data
+      ...parsed
     });
 
   } catch (err) {
